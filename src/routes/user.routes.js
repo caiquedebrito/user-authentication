@@ -1,55 +1,10 @@
-const express = require("express")
+const Router = require("express").Router
 const bcrypt = require("bcrypt")
-
-
-class UsersRepository {
-  users = []
-
-  getAll() {
-    return this.users
-  }
-
-  create(user) {
-    this.users.push(user)
-  }
-
-  get(email) {
-    const user = this.users.find(user => user.email === email)
-
-    return user
-  }
-
-  async uptade(newUserCredentials) {
-    // Achar usuário
-    const user = this.get(newUserCredentials.email)
-
-    // Deletar usuário desatualizado
-    this.delete(newUserCredentials.email)
-
-    // Atualizar usuário: password ou usename (só um ou os dois)
-    // verificar se foi enviado um novo userName ou um novo password
-
-    const updatedUser = user
-    if (newUserCredentials.newCredentials?.password) {
-      const hashedPassword = await bcrypt.hash(newUserCredentials.newCredentials.password, 10)
-      updatedUser.password = hashedPassword
-    }
-
-    if (newUserCredentials.newCredentials?.userName) {
-      updatedUser.userName = newUserCredentials.newCredentials.userName
-    }
-
-    this.create(updatedUser)
-  }
-
-  delete(email) {
-    this.users = this.users.filter(user => user.email !== email)
-  }
-}
+const UsersRepository = require("../repositories/UsersRepository")
 
 const usersRepository = new UsersRepository()
 
-const userRoute = express.Router()
+const userRoute = Router()
 
 function findEmail(req, res, next) {
   const userExits = usersRepository.get(req.body.email)
@@ -72,7 +27,7 @@ function findUser(req, res, next) {
   next()
 }
 
-userRoute.get("/", (req, res) => {
+userRoute.get("/", (_, res) => {
   const users = usersRepository.getAll()
   res.json(users)
 })
@@ -81,7 +36,7 @@ userRoute.post("/", findEmail, async (req, res) => {
   try {
     const hashedPassword = await bcrypt.hash(req.body.password, 10)
     
-    const user = { userName: req.body.userName, email: req.body.email, password: hashedPassword }
+    const user = { userName: req.body.userName, email: req.body.email, password: hashedPassword, isPrivate: req.body.isPrivate }
 
     usersRepository.create(user)
 
