@@ -1,4 +1,4 @@
-const User = require("../db/schema/User")
+const User = require("../db/schemas/User")
 
 module.exports = class UserService {
   static async create(user) {

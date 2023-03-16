@@ -1,66 +1,76 @@
 const UserService = require("../services/UserService")
 const bcrypt = require("bcrypt")
+const tokenGenerator = require("../providers/TokenGenerator")
+const RefreshToken = require("../db/schemas/RefreshToken")
+const refreshTokenGenerator = require("../providers/RefreshTokenGenerator")
+const { verify } = require("jsonwebtoken")
 
 module.exports = class UserController {
-  static async getAllUser(_, res) {
+
+  static async getAllUser(_, response) {
     try {
       const users = await UserService.list()
-      res.status(200).json(users)
+      response.status(200).json(users)
     } catch(e) {
-      res.status(500).send()
+      response.status(500).send()
     }
   }
 
-  static async getUser(req, res) {
+  static async getUser(request, response) {
     try {
-      const { email, password } = req.body
+      const { email, password } = request.body
       const user = await UserService.findByEmail(email)
 
       if (!user) {
-        res.status(401).json({ error: "E-mail or password incorrect!" })
+        response.status(401).json({ error: "E-mail or password incorrect!" })
       }
 
       if (!(await bcrypt.compare(password, user.password))) {
-        res.status(401).json({ error: "E-mail or password incorrect!" })
+        response.status(401).json({ error: "E-mail or password incorrect!" })
       }
 
       const userData = {
-        id: user._id,
+        id: user._id.toString(),
         userName: user.userName,
         isPrivate: user.isPrivate
       }
 
-      res.status(200).json(userData)
+      const token = tokenGenerator.generate(userData)
+      const refreshToken = refreshTokenGenerator.generate(userData.id)
+
+      RefreshToken({ refreshToken, userData }).save()
+
+      response.status(200).json({ userData, token, refreshToken })
 
     } catch (error) {
-      res.status(500).send()
+      response.status(500).send()
     }
   }
 
-  static async createUser(req, res) {
+  static async createUser(request, response) {
     try {
-      const { email, userName, password, isPrivate } = req.body
+      const { email, userName, password, isPrivate } = request.body
 
       const user = await UserService.findByEmail(email)
 
       if (user) {
-        return res.status(400).send()
+        return response.status(400).json({ error: "User already exists!" })
       }
 
       const hashedPassword = await bcrypt.hash(password, 10)
 
       await UserService.create({ userName, email, password: hashedPassword, isPrivate })
 
-      res.status(201).send()
+      response.status(201).send()
 
     } catch (error) {
-      res.status(500).send()
+      response.status(500).send()
     }
   }
 
-  static async uptadeUser(req, res) {
+  static async uptadeUser(request, response) {
     try {
-      const { id, password, newCredentials: { newPassword, newUserName, isPrivate } } = req.body
+      const { id, password, newCredentials: { newPassword, newUserName, isPrivate } } = request.body
 
       const user = await UserService.findById(id)
 
@@ -68,7 +78,7 @@ module.exports = class UserController {
         !user || 
         !(await bcrypt.compare(password, user.password))
       ) {
-        res.status(401).send()
+        response.status(401).send()
       }
 
       const newUser = {}
@@ -88,15 +98,15 @@ module.exports = class UserController {
       
       await UserService.update(id, newUser)
 
-      res.status(200).send()
+      response.status(200).send()
     } catch (error) {
-      res.status(500).send()
+      response.status(500).send()
     }
   }
 
-  static async deleteUser(req, res) {
+  static async deleteUser(request, response) {
     try {
-      const { id, password } = req.body
+      const { id, password } = request.body
 
       const user = await UserService.findById(id)
 
@@ -104,14 +114,52 @@ module.exports = class UserController {
         !user || 
         !(await bcrypt.compare(password, user.password))
       ) {
-        res.status(401).send()
+        response.status(401).send()
       }
+
+      RefreshToken.deleteMany({ "userData.id": id })
 
       await UserService.delete(id)
 
-      res.status(200).send()
-    } catch (error) {
-      res.status(500).send()
+      response.status(200).send()
+    } catch(error) {
+      response.status(500).send()
+    }
+  }
+
+  static async getToken(request, response) {
+    const { refreshToken } = request.body
+
+    if (!refreshToken) {
+      return response.status(401).json({ message: "Refresh token is missing!" })
+    }
+
+    const savedRefreshToken = await RefreshToken.findOne({ refreshToken })
+
+    if (!savedRefreshToken) {
+      return response.status(401).json({ message: "Invalid refresh token!" })
+    }
+
+    try {
+      verify(savedRefreshToken.refreshToken, process.env.REFRESH_TOKEN_SECRET)
+
+      await RefreshToken.deleteOne({ refreshToken })
+
+      const userData = {
+        id: savedRefreshToken.userData.id.toString(),
+        userName: savedRefreshToken.userData.userName,
+        isPrivate: savedRefreshToken.userData.isPrivate
+      }
+
+      const token = tokenGenerator.generate(userData)
+
+      const newRefreshToken = refreshTokenGenerator.generate(userData.id)
+
+      RefreshToken({refreshToken: newRefreshToken, userData }).save()
+
+      return response.status(200).json({ token, refreshToken: newRefreshToken, userData })
+    } catch(error) {
+      return response.status(401).json({ message: "Invalid refresh token!" })
     }
   }
 }
