@@ -13,7 +13,7 @@ const authenticateUser = (request, response, next) => {
     verify(token, process.env.ACCESS_TOKEN_SECRET)
     return next()
   } catch(error) {
-    return response.status(401).json({ message: "Token invalid!" })
+    return response.status(403).json({ message: "Token invalid!" })
   }
 }
 

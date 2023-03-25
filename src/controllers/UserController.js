@@ -10,9 +10,9 @@ module.exports = class UserController {
   static async getAllUser(_, response) {
     try {
       const users = await UserService.list()
-      response.status(200).json(users)
+      return response.status(200).json(users)
     } catch(e) {
-      response.status(500).send()
+      return response.status(500).send()
     }
   }
 
@@ -21,12 +21,17 @@ module.exports = class UserController {
       const { email, password } = request.body
       const user = await UserService.findByEmail(email)
 
+      if (!email || !password) {
+        return response.status(400).json({ error: { code: 160, message: "Missing information!"}})
+      }
+
       if (!user) {
-        response.status(401).json({ error: "E-mail or password incorrect!" })
+        return response.status(401).json({ error: { code: 100, message: "E-mail or password incorrect!"}})
+
       }
 
       if (!(await bcrypt.compare(password, user.password))) {
-        response.status(401).json({ error: "E-mail or password incorrect!" })
+        return response.status(401).json({ error: { code: 100, message: "E-mail or password incorrect!"}})
       }
 
       const userData = {
@@ -40,31 +45,35 @@ module.exports = class UserController {
 
       RefreshToken({ refreshToken, userData }).save()
 
-      response.status(200).json({ userData, token, refreshToken })
+      return response.status(200).json({ userData, token, refreshToken })
 
     } catch (error) {
-      response.status(500).send()
+      return response.status(500).send()
     }
   }
 
   static async createUser(request, response) {
     try {
-      const { email, userName, password, isPrivate } = request.body
+      const { userName, email, password, isPrivate } = request.body
+
+      if (!userName || !email || !password || !isPrivate.toString()) {
+        return response.status(400).json({ error: { code: 160, message: "Missing information!"}})
+      }
 
       const user = await UserService.findByEmail(email)
 
       if (user) {
-        return response.status(400).json({ error: "User already exists!" })
+        return response.status(400).json({ error: { code: 130, message: "User already exists!"}})
       }
 
       const hashedPassword = await bcrypt.hash(password, 10)
 
       await UserService.create({ userName, email, password: hashedPassword, isPrivate })
 
-      response.status(201).send()
+      return response.status(201).send()
 
     } catch (error) {
-      response.status(500).send()
+      return response.status(500).send()
     }
   }
 
@@ -78,7 +87,7 @@ module.exports = class UserController {
         !user || 
         !(await bcrypt.compare(password, user.password))
       ) {
-        response.status(401).send()
+        return response.status(401).send()
       }
 
       const newUser = {}
@@ -98,9 +107,19 @@ module.exports = class UserController {
       
       await UserService.update(id, newUser)
 
-      response.status(200).send()
+      const uptadedUser = {
+        id: user._id,
+        userName: newUserName,
+        isPrivate
+      }
+
+      // gerar novo token
+      const token = tokenGenerator.generate(uptadedUser)
+      const refreshToken = refreshTokenGenerator.generate(uptadedUser.id)
+
+      return response.status(200).json({ token, refreshToken, ...uptadedUser})
     } catch (error) {
-      response.status(500).send()
+      return response.status(500).send()
     }
   }
 
@@ -114,16 +133,16 @@ module.exports = class UserController {
         !user || 
         !(await bcrypt.compare(password, user.password))
       ) {
-        response.status(401).send()
+        return response.status(401).send()
       }
 
       RefreshToken.deleteMany({ "userData.id": id })
 
       await UserService.delete(id)
 
-      response.status(200).send()
+      return response.status(200).send()
     } catch(error) {
-      response.status(500).send()
+      return response.status(500).send()
     }
   }
 
@@ -131,13 +150,13 @@ module.exports = class UserController {
     const { refreshToken } = request.body
 
     if (!refreshToken) {
-      return response.status(401).json({ message: "Refresh token is missing!" })
+      return response.status(401).json({ error: { code: 140, message: "Refresh token is missing!"}})
     }
 
     const savedRefreshToken = await RefreshToken.findOne({ refreshToken })
 
     if (!savedRefreshToken) {
-      return response.status(401).json({ message: "Invalid refresh token!" })
+      return response.status(403).json({ error: { code: 150, message: "Invalid refresh token!"}})
     }
 
     try {
@@ -159,7 +178,24 @@ module.exports = class UserController {
 
       return response.status(200).json({ token, refreshToken: newRefreshToken, userData })
     } catch(error) {
-      return response.status(401).json({ message: "Invalid refresh token!" })
+      RefreshToken.deleteOne({ refreshToken })
+      return response.status(403).json({ error: { code: 150, message: "Invalid refresh token!"}})
+    }
+  }
+
+  static async logout(request, response) {
+    const { refreshToken } = request.body
+
+    if (!refreshToken) {
+      return response.status(403).send()
+    }
+
+    try {
+      await RefreshToken.deleteOne({refreshToken})
+
+      return response.status(200).send()
+    } catch (error) {
+      return response.status(500).send()
     }
   }
 }
